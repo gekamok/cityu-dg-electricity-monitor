@@ -1,0 +1,25 @@
+{
+  "name": "cityu-dg-electricity-monitor",
+  "version": "1.0.0",
+  "description": "Unofficial local electricity usage monitor and analytics dashboard for CityU(DG) OneBill.",
+  "main": "monitor.cjs",
+  "scripts": {
+    "start": "node monitor.cjs",
+    "login": "node login.cjs",
+    "check": "node --check auth.cjs && node --check sampler.cjs && node --check store.cjs && node --check dashboard.cjs && node --check login.cjs && node --check reauth.cjs && node --check monitor.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gekamok/cityu-dg-electricity-monitor.git"
+  },
+  "homepage": "https://github.com/gekamok/cityu-dg-electricity-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/gekamok/cityu-dg-electricity-monitor/issues"
+  },
+  "keywords": ["cityu-dg","onebill","electricity","monitor","dashboard","sqlite"],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {"node": ">=22.5.0"},
+  "dependencies": {"playwright-core": "1.63.0"}
+}
