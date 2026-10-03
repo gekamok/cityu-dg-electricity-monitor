@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node monitor.cjs",
     "login": "node login.cjs",
-    "check": "node --check auth.cjs && node --check sampler.cjs && node --check store.cjs && node --check dashboard.cjs && node --check login.cjs && node --check reauth.cjs && node --check monitor.cjs"
+    "check": "node --check auth.cjs && node --check sampler.cjs && node --check store.cjs && node --check dashboard.cjs && node --check edge-session.cjs && node --check onebill-auth.cjs && node --check login.cjs && node --check reauth.cjs && node --check monitor.cjs"
   },
   "repository": {
     "type": "git",
@@ -16,10 +16,21 @@
   "bugs": {
     "url": "https://github.com/gekamok/cityu-dg-electricity-monitor/issues"
   },
-  "keywords": ["cityu-dg","onebill","electricity","monitor","dashboard","sqlite"],
+  "keywords": [
+    "cityu-dg",
+    "onebill",
+    "electricity",
+    "monitor",
+    "dashboard",
+    "sqlite"
+  ],
   "author": "",
   "license": "MIT",
   "type": "commonjs",
-  "engines": {"node": ">=22.5.0"},
-  "dependencies": {"playwright-core": "1.63.0"}
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
 }

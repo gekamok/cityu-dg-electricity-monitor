@@ -212,7 +212,7 @@ function exportCsv(){
   const csv='\ufeff'+rows.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='electricity-'+selectedDay+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)
 }
 $('refresh').onclick=async()=>{$('status').textContent='正在刷新...';await fetch('/api/force-refresh',{method:'POST'});await loadOverview();if(selectedDay===rangeData?.today)await loadDay(selectedDay)};
-$('login').onclick=async()=>{await fetch('/api/open-login',{method:'POST'});$('status').textContent='已打开登录窗口，完成登录后会自动保存'};
+$('login').onclick=async()=>{const r=await fetch('/api/open-login',{method:'POST'}).then(x=>x.json());$('status').textContent=r.alreadyOpen?'登录窗口已经打开':'已打开专用 Edge 登录窗口，验证成功后会自动保存'};
 $('dayPicker').onchange=e=>loadDay(e.target.value);$('prevDay').onclick=()=>moveDay(-1);$('nextDay').onclick=()=>moveDay(1);$('todayBtn').onclick=()=>loadDay(rangeData.today);$('csvBtn').onclick=exportCsv;
 window.onresize=()=>{renderDay();drawBars('dailyBars',longData.daily,r=>r.label,{labelEvery:5});drawBars('weeklyBars',longData.weekly,r=>r.label,{labelEvery:2});drawBars('monthlyBars',longData.monthly,r=>r.label,{labelEvery:2})};
 loadOverview().catch(e=>{$('status').textContent='加载失败：'+e.message});
@@ -230,6 +230,7 @@ function json(res, value, status=200) {
 function startDashboard(options) {
   const { port, getStatus, sampleNow } = options;
   const clients = new Set();
+  let loginChild = null;
 
   function push(type, payload) {
     const msg='event: '+type+'\ndata: '+JSON.stringify(payload)+'\n\n';
@@ -251,7 +252,13 @@ function startDashboard(options) {
       if(req.method==='GET'&&url.pathname==='/api/analysis/monthly')return json(res,monthlyUsage(url.searchParams.get('months')||12));
       if(req.method==='GET'&&url.pathname==='/events'){res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache','Connection':'keep-alive'});res.write('event: status\ndata: '+JSON.stringify(getStatus())+'\n\n');clients.add(res);req.on('close',()=>clients.delete(res));return}
       if(req.method==='POST'&&url.pathname==='/api/force-refresh')return json(res,await sampleNow('manual'));
-      if(req.method==='POST'&&url.pathname==='/api/open-login'){const child=spawn(process.execPath,[path.join(__dirname,'login.cjs')],{cwd:__dirname,detached:true,stdio:'ignore',windowsHide:false});child.unref();return json(res,{ok:true})}
+      if(req.method==='POST'&&url.pathname==='/api/open-login'){
+        if(loginChild && loginChild.exitCode===null) return json(res,{ok:true,alreadyOpen:true});
+        loginChild=spawn(process.execPath,[path.join(__dirname,'login.cjs')],{cwd:__dirname,stdio:'ignore',windowsHide:true});
+        loginChild.on('close',()=>{loginChild=null;setTimeout(()=>sampleNow('login-complete'),500)});
+        loginChild.on('error',()=>{loginChild=null});
+        return json(res,{ok:true,alreadyOpen:false})
+      }
       res.statusCode=404;res.end('not found');
     } catch(error) {
       json(res,{ok:false,error:String(error.message||error)},400);

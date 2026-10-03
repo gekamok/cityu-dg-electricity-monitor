@@ -1,75 +1,70 @@
-const fs = require('node:fs');
-const { chromium } = require('playwright-core');
 const { PROFILE_DIR, protectToken, loadConfig, saveConfig, ensureDirs } = require('./auth.cjs');
+const { launchEdgeSession, sleep } = require('./edge-session.cjs');
+const { validateToken, captureMeterFromPage, readToken, clearToken, clickRefresh } = require('./onebill-auth.cjs');
 
 ensureDirs();
 
-function edgePath() {
-  const candidates = [
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
-  ];
-  return candidates.find(fs.existsSync) || candidates[0];
-}
-
 async function main() {
   const cfg = loadConfig();
-  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    executablePath: edgePath(),
-    headless: true,
-    args: ['--no-first-run', '--no-default-browser-check']
+  const session = await launchEdgeSession({
+    profileDir: PROFILE_DIR,
+    url: cfg.origin + '/home',
+    headless: true
   });
 
-  let meterSn = cfg.meterSn;
-  let remain = null;
-  let updatedAt = null;
+  let meterSn = cfg.meterSn || null;
   try {
-    const page = context.pages()[0] || await context.newPage();
-    page.setDefaultTimeout(12000);
+    const page = session.page;
+    page.setDefaultTimeout(8000);
+    captureMeterFromPage(page, cfg, value => { meterSn = value; });
 
-    let capturedResolve;
-    const captured = new Promise(resolve => { capturedResolve = resolve; });
+    await page.goto(cfg.origin + '/home', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await sleep(1200);
 
-    page.on('response', async response => {
-      try {
-        const request = response.request();
-        const url = new URL(request.url());
-        if (url.origin !== cfg.origin || url.pathname !== '/api/walletManagement/updateRemainCapacity') return;
-        const body = JSON.parse(request.postData() || '{}');
-        const json = await response.json();
-        if (body.meterSn) meterSn = body.meterSn;
-        if (json && json.data) {
-          remain = Number(json.data.remainRapacity);
-          updatedAt = json.data.updatedAt || null;
+    for (let pass = 0; pass < 2; pass++) {
+      let token = await readToken(page, cfg.origin);
+      if (token && !meterSn) {
+        await clickRefresh(page);
+        await sleep(1000);
+        token = await readToken(page, cfg.origin);
+      }
+
+      if (token && meterSn) {
+        const result = await validateToken(cfg, token, meterSn);
+        if (result.ok) {
+          protectToken(token);
+          saveConfig({ meterSn, lastAuthAt: new Date().toISOString() });
+          console.log(JSON.stringify({
+            ok: true,
+            tokenStoredWithDpapi: true,
+            meterDiscovered: Boolean(meterSn),
+            browserSessionRefreshed: true
+          }));
+          return;
         }
-        capturedResolve();
-      } catch {}
-    });
+        if (result.unauthorized && pass === 0) {
+          await clearToken(page, cfg.origin);
+          await page.goto(cfg.origin + '/home', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+          await sleep(5000);
+          continue;
+        }
+      }
 
-    await page.goto(cfg.origin + '/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(1800);
-
-    const token = await page.evaluate(() => localStorage.getItem('eb-token'));
-    if (!token) throw new Error('eb-token not available; interactive login required');
-
-    const refresh = page.locator('.refresh-icon').first();
-    if (await refresh.count()) {
-      await refresh.click();
-      await Promise.race([captured, page.waitForTimeout(5000)]);
+      if (pass === 0) {
+        await clickRefresh(page);
+        await sleep(2500);
+      }
     }
 
-    if (!meterSn) throw new Error('meterSn not discovered');
-    protectToken(token);
-    saveConfig({ meterSn, lastAuthAt: new Date().toISOString() });
-
-    console.log(JSON.stringify({ ok: true, meterDiscovered: Boolean(meterSn), remain, updatedAt, tokenStoredWithDpapi: true }));
+    const error = new Error('interactive login required');
+    error.authRequired = true;
+    throw error;
   } finally {
-    await context.close();
+    await session.close();
   }
 }
 
 main().catch(error => {
-  console.error(JSON.stringify({ ok: false, error: String(error.message || error) }));
+  console.error(JSON.stringify({ ok: false, authRequired: true, error: String(error.message || error) }));
   process.exit(2);
 });
-

@@ -1,6 +1,8 @@
 const fs = require('node:fs');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { loadConfig, LOG_FILE, ensureDirs } = require('./auth.cjs');
-const { getReading, authPresent } = require('./sampler.cjs');
+const { getReading, authPresent, reloadToken } = require('./sampler.cjs');
 const store = require('./store.cjs');
 const { startDashboard } = require('./dashboard.cjs');
 
@@ -33,17 +35,22 @@ const state = {
   lastSampleAt: null,
   lastRemain: null,
   lastServerUpdatedAt: null,
-  lastLatencyMs: null
+  lastLatencyMs: null,
+  sessionKeepaliveRunning: false,
+  lastSessionKeepaliveAt: null,
+  lastSessionKeepaliveError: null
 };
 
 let dashboard = null;
 
 function snapshot() {
+  const latest = loadConfig();
   return {
     ...state,
     ...store.statusData(),
-    intervalSeconds: Number(loadConfig().intervalSeconds || 60),
-    dashboardPort: Number(loadConfig().dashboardPort || 17890)
+    intervalSeconds: Number(latest.intervalSeconds || 60),
+    dashboardPort: Number(latest.dashboardPort || 17890),
+    browserKeepaliveMinutes: Number(latest.browserKeepaliveMinutes || 60)
   };
 }
 
@@ -79,6 +86,50 @@ async function sampleNow(reason = 'timer') {
   }
 }
 
+async function refreshBrowserSession(reason = 'timer') {
+  if (state.sessionKeepaliveRunning) return { ok: false, busy: true };
+  state.sessionKeepaliveRunning = true;
+
+  return await new Promise(resolve => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'reauth.cjs')], {
+      cwd: __dirname,
+      windowsHide: true,
+      stdio: 'ignore'
+    });
+
+    let settled = false;
+    const finish = (ok, error = null) => {
+      if (settled) return;
+      settled = true;
+      state.sessionKeepaliveRunning = false;
+      state.lastSessionKeepaliveAt = new Date().toISOString();
+      state.lastSessionKeepaliveError = error;
+      if (ok) {
+        reloadToken();
+        log('浏览器会话保活成功', { reason });
+      } else {
+        log('浏览器会话保活失败', { reason, error });
+      }
+      dashboard?.push('status', snapshot());
+      resolve({ ok, error });
+    };
+
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      finish(false, 'timeout');
+    }, 60000);
+
+    child.on('error', error => {
+      clearTimeout(timer);
+      finish(false, String(error.message || error));
+    });
+    child.on('close', code => {
+      clearTimeout(timer);
+      finish(code === 0, code === 0 ? null : 'interactive login required');
+    });
+  });
+}
+
 function shutdown() {
   try { dashboard?.server.close(); } catch {}
   try { store.close(); } catch {}
@@ -91,8 +142,14 @@ dashboard = startDashboard({ port, getStatus: snapshot, sampleNow });
 dashboard.server.on('listening', () => {
   log('电量监控已启动', { dashboard: 'http://127.0.0.1:' + port + '/' });
   sampleNow('startup');
+
   const interval = Math.max(30, Number(loadConfig().intervalSeconds || 60)) * 1000;
   setInterval(() => sampleNow('timer'), interval);
+
+  const keepaliveMinutes = Math.max(15, Number(loadConfig().browserKeepaliveMinutes || 60));
+  setTimeout(() => refreshBrowserSession('startup-delayed'), Math.min(5, keepaliveMinutes) * 60 * 1000);
+  setInterval(() => refreshBrowserSession('timer'), keepaliveMinutes * 60 * 1000);
+  log('浏览器会话保活已启用', { everyMinutes: keepaliveMinutes });
 });
 
 dashboard.server.on('error', error => {

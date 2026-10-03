@@ -35,7 +35,7 @@ New-Item -ItemType Directory -Force -Path $app,$data,$profile | Out-Null
 
 $files = @(
   'monitor.cjs','dashboard.cjs','store.cjs','sampler.cjs','auth.cjs',
-  'reauth.cjs','login.cjs','dpapi.ps1','package.json','package-lock.json'
+  'reauth.cjs','login.cjs','edge-session.cjs','onebill-auth.cjs','dpapi.ps1','package.json','package-lock.json'
 )
 foreach($file in $files) {
   Copy-Item (Join-Path $source $file) (Join-Path $app $file) -Force

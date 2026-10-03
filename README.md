@@ -34,6 +34,7 @@ OneBill 页面可以查看“剩余电量”，但不方便长期回答这些问
 - 充值 / 补电单独统计，不计作负用电
 - 采样断档超过 3 分钟时标记为估算区间，并按时间跨度分摊到小时 / 天 / 周 / 月
 - 登录状态失效时先尝试无界面恢复；需要人工登录时可在仪表盘一键重新登录
+- 默认每 **60 分钟**用专用 Edge profile 做一次浏览器级会话保活，尽量延长 SSO / Cookie 会话
 - Windows 登录后自动启动
 - 默认保留 **400 天**历史数据
 - 日志自动轮换
@@ -68,7 +69,7 @@ POST /api/walletManagement/updateRemainCapacity
 4. 将 OneBill 登录 token 用 **Windows DPAPI** 加密后只保存在本机
 5. 之后由 Node.js 直接调用登录后页面使用的接口进行采样
 
-正常采样不需要 Edge 常驻。只有首次登录，或登录状态彻底失效时，才需要浏览器。
+正常采样不需要 Edge 常驻。程序会定期短暂启动一次**无界面 Edge**访问 OneBill，用于维持浏览器级 SSO / Cookie 会话；完成后立即退出。首次登录或统一认证彻底失效时才需要可见浏览器。
 
 ## 隐私与安全
 
@@ -201,7 +202,14 @@ http://127.0.0.1:17890/
 
 请把它当作个人用电分析工具，而不是计费凭证。
 
-## 登录失效
+## 登录与会话保活
+
+OneBill 当前使用的是服务端会话 token；没有发现可供客户端长期持有的标准 refresh-token 接口，因此不存在真正意义上的“永久 Cookie”。服务器仍可主动让会话绝对过期。
+
+本项目采用两层保活：
+
+1. 每分钟直接请求电量接口，保持轻量采样；
+2. 默认每 60 分钟短暂启动一次专用 Edge profile，无界面访问 OneBill，让 SSO / Cookie / 本地 token 有机会按服务端策略续期。
 
 通常不需要处理。
 
@@ -230,13 +238,14 @@ http://127.0.0.1:17890/
   "from": "mobile",
   "intervalSeconds": 60,
   "dashboardPort": 17890,
-  "retentionDays": 400
+  "retentionDays": 400,
+  "browserKeepaliveMinutes": 60
 }
 ```
 
 `meterSn` 会在首次登录时自动发现，不需要手填。
 
-修改 `intervalSeconds` 后需要重启计划任务才会使用新的采样间隔。不建议设置得过于频繁。
+修改 `intervalSeconds` 或 `browserKeepaliveMinutes` 后需要重启计划任务才会生效。浏览器级保活不建议设置得过于频繁；默认 60 分钟。
 
 ## 开发运行
 
@@ -279,6 +288,7 @@ $env:CITYU_DG_ELECTRICITY_MONITOR_HOME = "$PWD\.dev-data"
 
 - 当前只做 Windows 版本
 - 依赖 Microsoft Edge
+- 无法绕过学校/服务端设置的绝对会话过期；如果 SSO 本身失效，仍需人工重新登录
 - 依赖 OneBill 当前网页结构和接口行为
 - 不保证学校系统改版后仍可直接使用
 - 首次开始运行以前的历史电量无法自动补回

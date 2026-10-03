@@ -66,6 +66,7 @@ function loadConfig() {
     intervalSeconds: 60,
     dashboardPort: 17890,
     retentionDays: 400,
+    browserKeepaliveMinutes: 60,
     lastAuthAt: null
   };
   if (!fs.existsSync(CONFIG_FILE)) return defaults;

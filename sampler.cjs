@@ -109,4 +109,4 @@ function authPresent() {
   return Boolean(token || loadToken());
 }
 
-module.exports = { getReading, headlessReauth, authPresent };
+module.exports = { getReading, headlessReauth, authPresent, reloadToken: loadToken };
